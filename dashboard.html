@@ -32,6 +32,7 @@
   .vrow{display:flex;justify-content:space-between;font-size:11px;color:var(--mut)}
   section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
   section h2{font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;padding:9px 12px;border-bottom:1px solid var(--line)}
+  section .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}
   table{width:100%;border-collapse:collapse;font-size:12px}
   th{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;font-weight:500}
   th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -142,7 +143,7 @@ async function refresh(){
     $('log').innerHTML = (s.log||[]).join('<br>');
 
     const c = s.config||{};
-    const show = ['MOM_MIN','DELTA_MIN','DELTA_MAX','SPREAD_CAP','MIN_DTE','MAX_DTE','PER_TRADE_BUDGET','MAX_CONC','TP_PCT','SL_PCT','TIME_STOP_MIN','DAILY_LOSS_STOP','COOLDOWN_MIN','WATCHLIST'];
+    const show = ['SIGNAL_MODE','RSI_LONG_MIN','RSI_LONG_MAX','RVOL_MIN','BOOK_IMB_MIN','VWAP_FILTER','MOM_MIN_V2','DELTA_MIN','DELTA_MAX','SPREAD_CAP','MIN_DTE','MAX_DTE','PER_TRADE_BUDGET','MAX_TOTAL_EXPOSURE','MAX_CONC','TP_PCT','SL_PCT','TIME_STOP_MIN','DAILY_LOSS_STOP','BANKROLL_STOP','COOLDOWN_MIN','WATCHLIST'];
     $('cfg').innerHTML = show.map(k=>`<span>${k} <b>${c[k]}</b></span>`).join('');
   }catch(e){ $('mode').textContent='API ERROR'; }
 }
@@ -151,15 +152,19 @@ async function refreshLedger(){
   try{
     const d = await (await fetch('/api/ledger')).json();
     const rows = d.ledger||[];
-    $('ledger').innerHTML = rows.length ? `<table><tr>
-      <th>Contract</th><th>Δ</th><th>Mom</th><th>Hold</th><th>Exit</th><th>P&L</th></tr>` +
+    $('ledger').innerHTML = rows.length ? `<div class="tbl"><table><tr>
+      <th>Contract</th><th>Sig</th><th>Δ</th><th>RSI</th><th>RVOL</th><th>Book</th><th>Mom</th><th>Hold</th><th>Exit</th><th>P&L</th></tr>` +
       rows.slice(0,30).map(r=>`<tr>
         <td>${r.underlying} ${r.strike}${r.direction==='call'?'C':'P'}</td>
+        <td>${r.signalMode==='v2'?'v2':'v1'}</td>
         <td class="num">${r.entryDelta??'—'}</td>
+        <td class="num">${r.entryRsi??'—'}</td>
+        <td class="num">${r.entryRvol??'—'}</td>
+        <td class="num">${r.entryBookImb??'—'}</td>
         <td class="num">${r.entryMomentum!=null?pct(r.entryMomentum):'—'}</td>
         <td class="num">${r.holdMin}m</td>
         <td><span class="chip ${r.reason}">${r.reason}</span></td>
-        <td class="num ${cls(r.pnl)}">${sign$(r.pnl)}</td></tr>`).join('') + '</table>'
+        <td class="num ${cls(r.pnl)}">${sign$(r.pnl)}</td></tr>`).join('') + '</table></div>'
       : '<div class="empty">No closed trades yet.</div>';
   }catch(e){}
 }
