@@ -69,6 +69,37 @@ async function stockSnapshots(symbols) {
   return req(url);
 }
 
+// Latest top-of-book quotes for a batch of symbols (bp/bs/ap/as)
+async function latestQuotes(symbols) {
+  const url = `${D}/v2/stocks/quotes/latest?symbols=${symbols.join(',')}&feed=${C.STOCK_FEED}`;
+  const body = await req(url);
+  return body.quotes || {};
+}
+
+// Intraday bars for a batch of symbols since startIso (paginated).
+// Returns { SYM: [ {t,o,h,l,c,v}, ... ] } sorted ascending.
+async function stockBars(symbols, timeframe, startIso) {
+  const out = {};
+  let pageToken = null;
+  do {
+    const p = new URLSearchParams({
+      symbols: symbols.join(','),
+      timeframe,
+      start: startIso,
+      limit: '10000',
+      feed: C.STOCK_FEED,
+      sort: 'asc',
+    });
+    if (pageToken) p.set('page_token', pageToken);
+    const body = await req(`${D}/v2/stocks/bars?${p.toString()}`);
+    for (const [sym, bars] of Object.entries(body.bars || {})) {
+      out[sym] = (out[sym] || []).concat(bars);
+    }
+    pageToken = body.next_page_token || null;
+  } while (pageToken);
+  return out;
+}
+
 // Full option chain snapshots for one underlying (paginated), with greeks + IV.
 // filters: { type: 'call'|'put', expGte: 'YYYY-MM-DD', expLte: 'YYYY-MM-DD' }
 async function optionChain(underlying, filters = {}) {
@@ -116,6 +147,6 @@ function dte(expIso, nowMs = Date.now()) {
 module.exports = {
   account, clock, positions, openOrders, getOrder, cancelOrder,
   placeOrder, closePosition,
-  stockSnapshots, optionChain, optionSnapshots,
+  stockSnapshots, latestQuotes, stockBars, optionChain, optionSnapshots,
   parseOcc, dte,
 };
