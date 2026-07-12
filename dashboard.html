@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STRIKEBOT · options paper desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#07100b; --panel:#0d1811; --panel2:#101d14; --line:#1c2b20;
+    --text:#d7e4da; --mut:#6f8577; --grn:#35e07c; --red:#ff5d6c; --amb:#f5b84d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--ink);color:var(--text);font:14px/1.5 "IBM Plex Mono",ui-monospace,Menlo,monospace;padding:14px;max-width:760px;margin:0 auto}
+  .num{font-variant-numeric:tabular-nums}
+  header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--mut);flex:none}
+  .dot.on{background:var(--grn);box-shadow:0 0 10px var(--grn),0 0 22px rgba(53,224,124,.45)}
+  .dot.halt{background:var(--amb);box-shadow:0 0 10px var(--amb)}
+  h1{font-size:15px;font-weight:600;letter-spacing:.14em}
+  .tag{margin-left:auto;font-size:11px;color:var(--mut);letter-spacing:.08em}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px}
+  @media(min-width:560px){.grid{grid-template-columns:repeat(3,1fr)}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .card .k{font-size:10px;letter-spacing:.12em;color:var(--mut);text-transform:uppercase;margin-bottom:3px}
+  .card .v{font-size:17px;font-weight:600}
+  .pos{color:var(--grn)} .neg{color:var(--red)} .flat{color:var(--mut)}
+  .verdict{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+  .vbar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;display:flex;margin:8px 0 6px}
+  .vbar .w{background:var(--grn)} .vbar .l{background:var(--red)}
+  .vrow{display:flex;justify-content:space-between;font-size:11px;color:var(--mut)}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
+  section h2{font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;padding:9px 12px;border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;font-weight:500}
+  th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  tr:last-child td{border-bottom:none}
+  .empty{padding:16px 12px;color:var(--mut);font-size:12px}
+  .chip{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--mut)}
+  .chip.tp{color:var(--grn);border-color:var(--grn)} .chip.sl{color:var(--red);border-color:var(--red)}
+  .controls{display:flex;gap:8px;margin-bottom:8px}
+  button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);font:600 12px "IBM Plex Mono",monospace;letter-spacing:.08em;padding:10px;border-radius:8px;cursor:pointer}
+  button:active{transform:translateY(1px)}
+  #btnFlat{color:var(--red);border-color:#3a2026}
+  .log{font-size:11px;color:var(--mut);padding:10px 12px;max-height:220px;overflow-y:auto;line-height:1.7}
+  .cfg{font-size:11px;color:var(--mut);padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+  .cfg b{color:var(--text);font-weight:500}
+  footer{color:var(--mut);font-size:10px;text-align:center;padding:10px 0 20px;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="dot"></div>
+  <h1>STRIKEBOT</h1>
+  <span class="tag" id="mode">—</span>
+</header>
+
+<div class="grid" id="stats"></div>
+
+<div class="verdict">
+  <div class="vrow"><span>NET VERDICT</span><span id="vnet" class="num">—</span></div>
+  <div class="vbar" id="vbar"><div class="w" style="width:50%"></div><div class="l" style="width:50%"></div></div>
+  <div class="vrow"><span id="vw">0 W</span><span id="vl">0 L</span></div>
+</div>
+
+<div class="controls">
+  <button id="btnHalt">HALT</button>
+  <button id="btnResume">RESUME</button>
+  <button id="btnFlat">FLATTEN ALL</button>
+</div>
+
+<section>
+  <h2>Open Positions</h2>
+  <div id="positions"><div class="empty">No open positions.</div></div>
+</section>
+
+<section>
+  <h2>Calibration Ledger</h2>
+  <div id="ledger"><div class="empty">No closed trades yet.</div></div>
+</section>
+
+<section>
+  <h2>Frozen Config</h2>
+  <div class="cfg" id="cfg"></div>
+</section>
+
+<section>
+  <h2>Log</h2>
+  <div class="log" id="log">…</div>
+</section>
+
+<footer>strikebot · alpaca paper · data = broker feed</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt$ = n => (n==null||isNaN(n)) ? '—' : (n<0?'-':'') + '$' + Math.abs(n).toLocaleString(undefined,{maximumFractionDigits:2});
+const sign$ = n => (n==null||isNaN(n)) ? '—' : (n>=0?'+':'-') + '$' + Math.abs(n).toFixed(2);
+const pct = n => (n==null||isNaN(n)) ? '—' : (n>=0?'+':'') + (n*100).toFixed(1) + '%';
+const cls = n => n>0?'pos':(n<0?'neg':'flat');
+
+function card(k,v,c){return `<div class="card"><div class="k">${k}</div><div class="v num ${c||''}">${v}</div></div>`}
+
+async function refresh(){
+  try{
+    const s = await (await fetch('/api/status')).json();
+    $('mode').textContent = s.mode + (s.marketOpen ? ' · MARKET OPEN' : ' · CLOSED');
+    const dot = $('dot');
+    dot.className = 'dot' + (s.halted ? ' halt' : (s.marketOpen ? ' on' : ''));
+
+    const L = s.lifetime||{};
+    $('stats').innerHTML =
+      card('Equity', fmt$(s.equity)) +
+      card('Day P&L', sign$(s.dayPnl), cls(s.dayPnl)) +
+      card('Open', `${(s.positions||[]).length}/${s.maxConc}`) +
+      card('Win Rate', s.winRate==null?'—':(s.winRate*100).toFixed(0)+'%', s.winRate>=.5?'pos':'') +
+      card('Lifetime Net', sign$(L.netPnl), cls(L.netPnl)) +
+      card('Lifetime Volume', fmt$(L.volume));
+
+    const w=L.wins||0, l=L.losses||0, t=w+l;
+    $('vnet').textContent = sign$(L.netPnl); $('vnet').className='num '+cls(L.netPnl);
+    $('vw').textContent = w+' W'; $('vl').textContent = l+' L';
+    $('vbar').innerHTML = t
+      ? `<div class="w" style="width:${(w/t*100).toFixed(1)}%"></div><div class="l" style="width:${(l/t*100).toFixed(1)}%"></div>`
+      : `<div style="width:100%;background:var(--line)"></div>`;
+
+    const ps = s.positions||[];
+    $('positions').innerHTML = ps.length ? `<table><tr>
+      <th>Contract</th><th>Qty</th><th>Entry</th><th>Mark</th><th>P&L</th><th>%</th><th>Age</th></tr>` +
+      ps.map(p=>`<tr>
+        <td>${p.underlying} ${p.strike}${p.direction==='call'?'C':'P'} ${p.exp.slice(5)}</td>
+        <td class="num">${p.qty}</td>
+        <td class="num">${p.entryPrice.toFixed(2)}</td>
+        <td class="num">${(p.mark||0).toFixed(2)}</td>
+        <td class="num ${cls(p.pnl)}">${sign$(p.pnl)}</td>
+        <td class="num ${cls(p.pnlPct)}">${pct(p.pnlPct)}</td>
+        <td class="num">${p.ageMin}m</td></tr>`).join('') + '</table>'
+      : '<div class="empty">No open positions.</div>';
+
+    if (s.haltReason) $('mode').textContent += ' · ' + s.haltReason.toUpperCase();
+    $('log').innerHTML = (s.log||[]).join('<br>');
+
+    const c = s.config||{};
+    const show = ['MOM_MIN','DELTA_MIN','DELTA_MAX','SPREAD_CAP','MIN_DTE','MAX_DTE','PER_TRADE_BUDGET','MAX_CONC','TP_PCT','SL_PCT','TIME_STOP_MIN','DAILY_LOSS_STOP','COOLDOWN_MIN','WATCHLIST'];
+    $('cfg').innerHTML = show.map(k=>`<span>${k} <b>${c[k]}</b></span>`).join('');
+  }catch(e){ $('mode').textContent='API ERROR'; }
+}
+
+async function refreshLedger(){
+  try{
+    const d = await (await fetch('/api/ledger')).json();
+    const rows = d.ledger||[];
+    $('ledger').innerHTML = rows.length ? `<table><tr>
+      <th>Contract</th><th>Δ</th><th>Mom</th><th>Hold</th><th>Exit</th><th>P&L</th></tr>` +
+      rows.slice(0,30).map(r=>`<tr>
+        <td>${r.underlying} ${r.strike}${r.direction==='call'?'C':'P'}</td>
+        <td class="num">${r.entryDelta??'—'}</td>
+        <td class="num">${r.entryMomentum!=null?pct(r.entryMomentum):'—'}</td>
+        <td class="num">${r.holdMin}m</td>
+        <td><span class="chip ${r.reason}">${r.reason}</span></td>
+        <td class="num ${cls(r.pnl)}">${sign$(r.pnl)}</td></tr>`).join('') + '</table>'
+      : '<div class="empty">No closed trades yet.</div>';
+  }catch(e){}
+}
+
+async function post(url){ try{ await fetch(url,{method:'POST'}); refresh(); }catch(e){} }
+$('btnHalt').onclick = ()=>post('/api/halt');
+$('btnResume').onclick = ()=>post('/api/resume');
+$('btnFlat').onclick = ()=>{ if(confirm('Flatten ALL open positions?')) post('/api/flatten'); };
+
+refresh(); refreshLedger();
+setInterval(refresh, 8000);
+setInterval(refreshLedger, 30000);
+</script>
+</body>
+</html>
