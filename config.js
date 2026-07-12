@@ -27,13 +27,29 @@ const CONFIG = {
   DRY_RUN: bool('DRY_RUN', false), // true = no orders sent, fills simulated (entry@ask, exit@bid)
 
   // ---- Universe ----
-  WATCHLIST: str('WATCHLIST', 'SPY,QQQ,NVDA,TSLA,AAPL,META,AMD,MSFT,AMZN,GOOGL')
+  // Tuned for a $200/trade premium budget: liquid names whose near-ATM weeklies price under ~$2.00
+  WATCHLIST: str('WATCHLIST', 'AMD,INTC,F,SOFI,PLTR,BAC,T,NIO,SNAP,UBER,RIVN,AAL')
     .split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
 
-  // ---- Signal (momentum) ----
-  MOM_MIN: num('MOM_MIN', 0.006),        // min abs day move to trigger (0.6%)
+  // ---- Signal engine ----
+  SIGNAL_MODE: str('SIGNAL_MODE', 'v2'), // 'v2' = RSI+RVOL+VWAP+book | 'momentum' = v1 day-move
   SCAN_INTERVAL_SEC: num('SCAN_INTERVAL_SEC', 60),
   COOLDOWN_MIN: num('COOLDOWN_MIN', 45), // per-underlying re-entry cooldown
+
+  // v1 (momentum)
+  MOM_MIN: num('MOM_MIN', 0.006),        // min abs day move to trigger (0.6%)
+
+  // v2 (scalper stack)
+  BAR_TIMEFRAME: str('BAR_TIMEFRAME', '5Min'),
+  RSI_PERIOD: num('RSI_PERIOD', 14),
+  RSI_LONG_MIN: num('RSI_LONG_MIN', 55),  // calls: RSI in [55,75] = trending, not exhausted
+  RSI_LONG_MAX: num('RSI_LONG_MAX', 75),  // puts mirror: RSI in [25,45]
+  RVOL_MIN: num('RVOL_MIN', 1.5),         // last bar volume vs avg of lookback bars
+  RVOL_LOOKBACK: num('RVOL_LOOKBACK', 20),
+  VWAP_FILTER: bool('VWAP_FILTER', true), // calls only above VWAP, puts only below
+  BOOK_FILTER: bool('BOOK_FILTER', true), // top-of-book size imbalance confirmation
+  BOOK_IMB_MIN: num('BOOK_IMB_MIN', 0.60),// bid share >= 0.60 for calls, <= 0.40 for puts
+  MOM_MIN_V2: num('MOM_MIN_V2', 0.003),   // softer day-move floor (0.3%), other gates do the work
 
   // ---- Contract selection ----
   MIN_DTE: num('MIN_DTE', 1),
@@ -44,15 +60,15 @@ const CONFIG = {
   MIN_BID: num('MIN_BID', 0.15),         // ignore illiquid dust contracts
 
   // ---- Sizing & risk ----
-  PER_TRADE_BUDGET: num('PER_TRADE_BUDGET', 500),  // $ per position (premium)
-  MAX_TOTAL_EXPOSURE: num('MAX_TOTAL_EXPOSURE', 0),// $ cap on TOTAL open premium (0 = off)
-  BANKROLL_STOP: num('BANKROLL_STOP', 0),          // permanent halt if lifetime net <= -$X (0 = off)
-  MAX_CONC: num('MAX_CONC', 4),                    // max simultaneous positions
+  PER_TRADE_BUDGET: num('PER_TRADE_BUDGET', 200),  // $ per position (premium)
+  MAX_TOTAL_EXPOSURE: num('MAX_TOTAL_EXPOSURE', 400),// $ cap on TOTAL open premium (0 = off)
+  BANKROLL_STOP: num('BANKROLL_STOP', 400),        // permanent halt if lifetime net <= -$X (0 = off)
+  MAX_CONC: num('MAX_CONC', 2),                    // max simultaneous positions
   TP_PCT: num('TP_PCT', 0.30),                     // take profit at +30% of premium
   SL_PCT: num('SL_PCT', 0.20),                     // stop loss at -20% of premium
   TIME_STOP_MIN: num('TIME_STOP_MIN', 90),         // exit stale positions
   EOD_FLATTEN_MIN: num('EOD_FLATTEN_MIN', 10),     // flatten N min before close
-  DAILY_LOSS_STOP: num('DAILY_LOSS_STOP', 300),    // halt day at -$X (0 = off)
+  DAILY_LOSS_STOP: num('DAILY_LOSS_STOP', 150),    // halt day at -$X (0 = off)
 
   // ---- Execution ----
   ORDER_TIMEOUT_SEC: num('ORDER_TIMEOUT_SEC', 25), // cancel unfilled limits after this
