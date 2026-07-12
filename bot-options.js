@@ -1,5 +1,6 @@
 // bot-options.js — the engine.
-// Signal: intraday momentum on the watchlist.
+// Signals: v2 = RSI band + relative volume + VWAP trend + top-of-book imbalance (SIGNAL_MODE=v2)
+//          v1 = simple day-move momentum (SIGNAL_MODE=momentum)
 // Selection: delta band + spread cap + budget on the option chain (greeks from Alpaca).
 // Exits: take-profit, stop-loss, time stop, EOD flatten, daily loss stop.
 // Risk rails: per-trade budget, total exposure cap, daily loss stop, bankroll kill switch.
@@ -8,6 +9,7 @@
 const A = require('./alpaca');
 const C = require('./config');
 const S = require('./state');
+const SIG = require('./signals');
 
 const { state, addLog } = S;
 
@@ -187,10 +189,25 @@ async function scanEntries(clock, slots) {
     : Infinity;
   if (room < C.MIN_BID * 100) return; // not enough room for even the cheapest contract
 
+  const candidates = C.SIGNAL_MODE === 'v2'
+    ? await scanV2(clock)
+    : await scanMomentum();
+
+  for (const cand of candidates.slice(0, slots)) {
+    try {
+      await tryEnter(cand, clock);
+    } catch (e) {
+      addLog(`entry failed ${cand.sym}: ${e.message}`);
+    }
+  }
+}
+
+// v1: simple day-move momentum
+async function scanMomentum() {
   let snaps;
   try { snaps = await A.stockSnapshots(C.WATCHLIST); }
-  catch (e) { addLog(`stock snapshots failed: ${e.message}`); return; }
-  const map = snaps.snapshots || snaps; // API returns the map at top level
+  catch (e) { addLog(`stock snapshots failed: ${e.message}`); return []; }
+  const map = snaps.snapshots || snaps;
 
   const openUnderlyings = new Set(Object.values(state.positions).map(p => p.underlying));
   const candidates = [];
@@ -206,21 +223,72 @@ async function scanEntries(clock, slots) {
     if (Math.abs(move) < C.MOM_MIN) continue;
     if (openUnderlyings.has(sym)) continue;
     if ((state.cooldowns[sym] || 0) > Date.now()) continue;
-    candidates.push({ sym, move, last });
+    candidates.push({ sym, move, direction: move > 0 ? 'call' : 'put', metrics: {}, mode: 'momentum' });
   }
-
   candidates.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
-
-  for (const cand of candidates.slice(0, slots)) {
-    try {
-      await tryEnter(cand, clock);
-    } catch (e) {
-      addLog(`entry failed ${cand.sym}: ${e.message}`);
-    }
-  }
+  return candidates;
 }
 
-async function tryEnter({ sym, move }, clock) {
+// v2: RSI + RVOL + VWAP + book imbalance
+async function scanV2(clock) {
+  const openUnderlyings = new Set(Object.values(state.positions).map(p => p.underlying));
+  const eligible = C.WATCHLIST.filter(sym =>
+    !openUnderlyings.has(sym) && (state.cooldowns[sym] || 0) <= Date.now());
+  if (!eligible.length) return [];
+
+  let snaps, bars, quotes;
+  try {
+    const startIso = new Date(Date.parse(clock.timestamp) - 3 * 86400000).toISOString();
+    [snaps, bars, quotes] = await Promise.all([
+      A.stockSnapshots(eligible),
+      A.stockBars(eligible, C.BAR_TIMEFRAME, startIso),
+      C.BOOK_FILTER ? A.latestQuotes(eligible) : Promise.resolve({}),
+    ]);
+  } catch (e) { addLog(`v2 data fetch failed: ${e.message}`); return []; }
+  const map = snaps.snapshots || snaps;
+  const dayKey = String(clock.timestamp).slice(0, 10);
+
+  const candidates = [];
+  const blocked = {};
+
+  for (const sym of eligible) {
+    const s = map[sym];
+    if (!s || !s.prevDailyBar || !s.prevDailyBar.c) continue;
+    const price = (s.latestTrade && s.latestTrade.p)
+      || (s.minuteBar && s.minuteBar.c)
+      || (s.dailyBar && s.dailyBar.c);
+    if (!price) continue;
+    const dayMove = (price - s.prevDailyBar.c) / s.prevDailyBar.c;
+
+    const verdict = SIG.evaluateV2({
+      bars: bars[sym] || [],
+      dayKey,
+      quote: quotes[sym],
+      dayMove,
+      price,
+    });
+
+    if (!verdict.direction) {
+      if (verdict.blockedBy) blocked[verdict.blockedBy] = (blocked[verdict.blockedBy] || 0) + 1;
+      continue;
+    }
+    candidates.push({
+      sym, move: dayMove, direction: verdict.direction,
+      metrics: verdict.metrics, mode: 'v2',
+    });
+  }
+
+  // Strongest conviction first: highest relative volume
+  candidates.sort((a, b) => (b.metrics.rvol || 0) - (a.metrics.rvol || 0));
+
+  if (!candidates.length && Object.keys(blocked).length) {
+    const summary = Object.entries(blocked).map(([k, v]) => `${k}:${v}`).join(' ');
+    addLog(`v2 scan: no signals (gates blocked — ${summary})`);
+  }
+  return candidates;
+}
+
+async function tryEnter({ sym, move, direction, metrics, mode }, clock) {
   // Budget for THIS trade = per-trade cap, shrunk to whatever exposure room remains.
   let budget = C.PER_TRADE_BUDGET;
   if (C.MAX_TOTAL_EXPOSURE > 0) {
@@ -229,7 +297,7 @@ async function tryEnter({ sym, move }, clock) {
     budget = Math.min(budget, room);
   }
 
-  const type = move > 0 ? 'call' : 'put';
+  const type = direction;
   const nowMs = Date.parse(clock.timestamp);
   const expGte = isoDate(nowMs + C.MIN_DTE * 86400000);
   const expLte = isoDate(nowMs + C.MAX_DTE * 86400000);
@@ -276,10 +344,15 @@ async function tryEnter({ sym, move }, clock) {
     qty,
     entryPrice: best.ask,
     openedAt: Date.now(),
+    signalMode: mode,
     entryDelta: round4(best.delta),
     entryIv: best.iv ? round4(best.iv) : null,
     entrySpreadPct: round4(best.spreadPct),
     entryMomentum: round4(move),
+    entryRsi: metrics.rsi ?? null,
+    entryRvol: metrics.rvol ?? null,
+    entryVwapDist: metrics.vwapDist ?? null,
+    entryBookImb: metrics.bookImb ?? null,
     dteAtEntry: A.dte(best.info.exp, nowMs),
     strike: best.info.strike,
     exp: best.info.exp,
@@ -287,9 +360,13 @@ async function tryEnter({ sym, move }, clock) {
     dryRun: C.DRY_RUN,
   };
 
+  const sigNote = mode === 'v2'
+    ? `RSI ${metrics.rsi} RVOL ${metrics.rvol} book ${metrics.bookImb ?? '—'}`
+    : `mom ${(move * 100).toFixed(2)}%`;
+
   if (C.DRY_RUN) {
     S.openPosition(meta);
-    addLog(`DRY enter ${best.occ} x${qty} @ ${best.ask} (Δ${meta.entryDelta}, mom ${(move * 100).toFixed(2)}%)`);
+    addLog(`DRY enter ${best.occ} x${qty} @ ${best.ask} (Δ${meta.entryDelta}, ${sigNote})`);
     return;
   }
 
@@ -304,7 +381,7 @@ async function tryEnter({ sym, move }, clock) {
     meta.qty = parseInt(done.filled_qty, 10);
     meta.entryPrice = parseFloat(done.filled_avg_price) || best.ask;
     S.openPosition(meta);
-    addLog(`enter ${best.occ} x${meta.qty} @ ${meta.entryPrice} (Δ${meta.entryDelta}, mom ${(move * 100).toFixed(2)}%)`);
+    addLog(`enter ${best.occ} x${meta.qty} @ ${meta.entryPrice} (Δ${meta.entryDelta}, ${sigNote})`);
   } else {
     if (done && done.status !== 'filled') { try { await A.cancelOrder(order.id); } catch {} }
     addLog(`${best.occ}: not filled in ${C.ORDER_TIMEOUT_SEC}s — cancelled`);
@@ -332,7 +409,7 @@ function round4(n) { return Math.round(n * 10000) / 10000; }
 
 function start() {
   S.load();
-  addLog(`bot started ${C.DRY_RUN ? '[DRY RUN]' : '[PAPER via Alpaca]'} — watchlist: ${C.WATCHLIST.join(', ')}`);
+  addLog(`bot started ${C.DRY_RUN ? '[DRY RUN]' : '[PAPER via Alpaca]'} — signal: ${C.SIGNAL_MODE} — watchlist: ${C.WATCHLIST.join(', ')}`);
   if (C.MAX_TOTAL_EXPOSURE > 0) addLog(`exposure cap: $${C.MAX_TOTAL_EXPOSURE} total open premium`);
   if (C.BANKROLL_STOP > 0) addLog(`bankroll stop: permanent halt at lifetime -$${C.BANKROLL_STOP}`);
   tick();
