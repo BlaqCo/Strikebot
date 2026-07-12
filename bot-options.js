@@ -2,6 +2,7 @@
 // Signal: intraday momentum on the watchlist.
 // Selection: delta band + spread cap + budget on the option chain (greeks from Alpaca).
 // Exits: take-profit, stop-loss, time stop, EOD flatten, daily loss stop.
+// Risk rails: per-trade budget, total exposure cap, daily loss stop, bankroll kill switch.
 // Every close writes a calibration row. The ledger decides what survives.
 
 const A = require('./alpaca');
@@ -24,6 +25,14 @@ async function tick() {
     S.rotateDay(clock.timestamp);
 
     try { latest.account = await A.account(); } catch (e) { /* non-fatal */ }
+
+    // Bankroll kill switch — re-applied every tick so the daily reset can't clear it.
+    if (C.BANKROLL_STOP > 0 && state.lifetime.netPnl <= -C.BANKROLL_STOP && !state.halted) {
+      state.halted = true;
+      state.haltReason = `bankroll stop: lifetime net $${state.lifetime.netPnl.toFixed(0)} <= -$${C.BANKROLL_STOP}`;
+      addLog(`BANKROLL STOP: ${state.haltReason}`);
+      S.save();
+    }
 
     if (!clock.is_open) {
       state.lastScanAt = Date.now();
@@ -49,6 +58,12 @@ async function tick() {
   } finally {
     ticking = false;
   }
+}
+
+// Total premium currently deployed across open positions ($)
+function openExposure() {
+  return Object.values(state.positions)
+    .reduce((s, p) => s + p.entryPrice * 100 * p.qty, 0);
 }
 
 // ---------------- Position management ----------------
@@ -166,6 +181,12 @@ async function flattenAll(reason) {
 // ---------------- Entries ----------------
 
 async function scanEntries(clock, slots) {
+  // Exposure gate: how much premium room is left under the cap?
+  const room = C.MAX_TOTAL_EXPOSURE > 0
+    ? C.MAX_TOTAL_EXPOSURE - openExposure()
+    : Infinity;
+  if (room < C.MIN_BID * 100) return; // not enough room for even the cheapest contract
+
   let snaps;
   try { snaps = await A.stockSnapshots(C.WATCHLIST); }
   catch (e) { addLog(`stock snapshots failed: ${e.message}`); return; }
@@ -200,6 +221,14 @@ async function scanEntries(clock, slots) {
 }
 
 async function tryEnter({ sym, move }, clock) {
+  // Budget for THIS trade = per-trade cap, shrunk to whatever exposure room remains.
+  let budget = C.PER_TRADE_BUDGET;
+  if (C.MAX_TOTAL_EXPOSURE > 0) {
+    const room = C.MAX_TOTAL_EXPOSURE - openExposure();
+    if (room <= 0) return;
+    budget = Math.min(budget, room);
+  }
+
   const type = move > 0 ? 'call' : 'put';
   const nowMs = Date.parse(clock.timestamp);
   const expGte = isoDate(nowMs + C.MIN_DTE * 86400000);
@@ -221,16 +250,16 @@ async function tryEnter({ sym, move }, clock) {
     if (spreadPct > C.SPREAD_CAP) continue;
     const delta = Math.abs(g.delta || 0);
     if (delta < C.DELTA_MIN || delta > C.DELTA_MAX) continue;
-    if (ask * 100 > C.PER_TRADE_BUDGET) continue;
+    if (ask * 100 > budget) continue;
 
     const score = spreadPct + Math.abs(delta - targetDelta) * 0.5;
     if (!best || score < best.score) {
       best = { occ, info, bid, ask, mid, spreadPct, delta, iv: snap.impliedVolatility, score };
     }
   }
-  if (!best) { addLog(`${sym} ${type}: no contract passed filters`); return; }
+  if (!best) { addLog(`${sym} ${type}: no contract passed filters (budget $${budget.toFixed(0)})`); return; }
 
-  const qty = Math.floor(C.PER_TRADE_BUDGET / (best.ask * 100));
+  const qty = Math.floor(budget / (best.ask * 100));
   if (qty < 1) return;
   const cost = best.ask * 100 * qty;
 
@@ -304,6 +333,8 @@ function round4(n) { return Math.round(n * 10000) / 10000; }
 function start() {
   S.load();
   addLog(`bot started ${C.DRY_RUN ? '[DRY RUN]' : '[PAPER via Alpaca]'} — watchlist: ${C.WATCHLIST.join(', ')}`);
+  if (C.MAX_TOTAL_EXPOSURE > 0) addLog(`exposure cap: $${C.MAX_TOTAL_EXPOSURE} total open premium`);
+  if (C.BANKROLL_STOP > 0) addLog(`bankroll stop: permanent halt at lifetime -$${C.BANKROLL_STOP}`);
   tick();
   setInterval(tick, C.SCAN_INTERVAL_SEC * 1000);
 }
