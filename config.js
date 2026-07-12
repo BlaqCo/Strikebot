@@ -44,13 +44,15 @@ const CONFIG = {
   MIN_BID: num('MIN_BID', 0.15),         // ignore illiquid dust contracts
 
   // ---- Sizing & risk ----
-  PER_TRADE_BUDGET: num('PER_TRADE_BUDGET', 500), // $ per position (premium)
-  MAX_CONC: num('MAX_CONC', 4),                   // max simultaneous positions
-  TP_PCT: num('TP_PCT', 0.30),                    // take profit at +30% of premium
-  SL_PCT: num('SL_PCT', 0.20),                    // stop loss at -20% of premium
-  TIME_STOP_MIN: num('TIME_STOP_MIN', 90),        // exit stale positions
-  EOD_FLATTEN_MIN: num('EOD_FLATTEN_MIN', 10),    // flatten N min before close
-  DAILY_LOSS_STOP: num('DAILY_LOSS_STOP', 300),   // halt day at -$X (0 = off)
+  PER_TRADE_BUDGET: num('PER_TRADE_BUDGET', 500),  // $ per position (premium)
+  MAX_TOTAL_EXPOSURE: num('MAX_TOTAL_EXPOSURE', 0),// $ cap on TOTAL open premium (0 = off)
+  BANKROLL_STOP: num('BANKROLL_STOP', 0),          // permanent halt if lifetime net <= -$X (0 = off)
+  MAX_CONC: num('MAX_CONC', 4),                    // max simultaneous positions
+  TP_PCT: num('TP_PCT', 0.30),                     // take profit at +30% of premium
+  SL_PCT: num('SL_PCT', 0.20),                     // stop loss at -20% of premium
+  TIME_STOP_MIN: num('TIME_STOP_MIN', 90),         // exit stale positions
+  EOD_FLATTEN_MIN: num('EOD_FLATTEN_MIN', 10),     // flatten N min before close
+  DAILY_LOSS_STOP: num('DAILY_LOSS_STOP', 300),    // halt day at -$X (0 = off)
 
   // ---- Execution ----
   ORDER_TIMEOUT_SEC: num('ORDER_TIMEOUT_SEC', 25), // cancel unfilled limits after this
